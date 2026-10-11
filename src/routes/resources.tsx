@@ -1,0 +1,3 @@
+import { createFileRoute } from '@tanstack/react-router'
+import { Resources } from '@/modules/workspace/pages'
+export const Route = createFileRoute('/resources')({head:()=>({meta:[{title:'Resource library — Ubasify Practical Labs'},{name:'description',content:'Download practical manuals, datasets and starter code.'},{property:'og:title',content:'Resource library — Ubasify Practical Labs'},{property:'og:description',content:'Download practical manuals, datasets and starter code.'},{property:'og:type',content:'website'},{name:'twitter:card',content:'summary_large_image'}]}),component:Resources})

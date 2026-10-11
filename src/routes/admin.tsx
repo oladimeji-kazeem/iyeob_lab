@@ -1,0 +1,3 @@
+import { createFileRoute } from '@tanstack/react-router'
+import { Admin } from '@/modules/workspace/pages'
+export const Route = createFileRoute('/admin')({head:()=>({meta:[{title:'Platform administration — Ubasify Practical Labs'},{name:'description',content:'Manage institutions, users, reusable templates and semester offerings.'},{property:'og:title',content:'Platform administration — Ubasify Practical Labs'},{property:'og:description',content:'Manage institutions, users, reusable templates and semester offerings.'},{property:'og:type',content:'website'},{name:'twitter:card',content:'summary_large_image'}]}),component:Admin})
