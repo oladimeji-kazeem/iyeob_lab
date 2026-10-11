@@ -1,0 +1,3 @@
+import { createFileRoute } from '@tanstack/react-router'
+import { Submissions } from '@/modules/workspace/pages'
+export const Route = createFileRoute('/submissions')({head:()=>({meta:[{title:'Submissions & grading — Ubasify Practical Labs'},{name:'description',content:'Track practical submissions and lecturer feedback.'},{property:'og:title',content:'Submissions & grading — Ubasify Practical Labs'},{property:'og:description',content:'Track practical submissions and lecturer feedback.'},{property:'og:type',content:'website'},{name:'twitter:card',content:'summary_large_image'}]}),component:Submissions})
