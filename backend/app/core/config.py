@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "iyeob_lab"
     DATABASE_URL: Optional[str] = None
 
+    # Supabase Configuration
+    SUPABASE_PROJECT_ID: str = "qlrdadewzqgvrfcclfim"
+    SUPABASE_URL: str = "https://qlrdadewzqgvrfcclfim.supabase.co"
+    SUPABASE_KEY: str = "sb_publishable_CBQUculxK-hOPnlfC7UYCQ_QebhjiDn"
+    SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
+
     @property
     def database_uri(self) -> str:
         """Constructs or returns the primary database connection URI."""
