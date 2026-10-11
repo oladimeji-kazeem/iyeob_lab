@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import List, Union
+from typing import List, Optional, Union
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -21,6 +21,24 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     PORT: int = 5000
     HOST: str = "0.0.0.0"
+
+    # PostgreSQL Database credentials and connection settings
+    POSTGRES_SERVER: str = "localhost"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = "postgres"
+    POSTGRES_DB: str = "iyeob_lab"
+    DATABASE_URL: Optional[str] = None
+
+    @property
+    def database_uri(self) -> str:
+        """Constructs or returns the primary database connection URI."""
+        if self.DATABASE_URL:
+            return self.DATABASE_URL
+        return (
+            f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        )
 
     # CORS configuration supporting either a JSON list or comma-separated string
     CORS_ORIGINS: Union[List[str], str] = [
