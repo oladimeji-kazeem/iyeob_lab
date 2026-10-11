@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS public.institutions (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+DROP TRIGGER IF EXISTS update_institutions_updated_at ON public.institutions;
 CREATE TRIGGER update_institutions_updated_at
 BEFORE UPDATE ON public.institutions
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS public.users (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+DROP TRIGGER IF EXISTS update_users_updated_at ON public.users;
 CREATE TRIGGER update_users_updated_at
 BEFORE UPDATE ON public.users
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -88,6 +90,7 @@ CREATE TABLE IF NOT EXISTS public.memberships (
 CREATE INDEX IF NOT EXISTS idx_memberships_user ON public.memberships(user_id);
 CREATE INDEX IF NOT EXISTS idx_memberships_institution ON public.memberships(institution_id);
 
+DROP TRIGGER IF EXISTS update_memberships_updated_at ON public.memberships;
 CREATE TRIGGER update_memberships_updated_at
 BEFORE UPDATE ON public.memberships
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -106,6 +109,7 @@ CREATE TABLE IF NOT EXISTS public.course_templates (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+DROP TRIGGER IF EXISTS update_course_templates_updated_at ON public.course_templates;
 CREATE TRIGGER update_course_templates_updated_at
 BEFORE UPDATE ON public.course_templates
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -131,6 +135,7 @@ CREATE INDEX IF NOT EXISTS idx_offerings_template ON public.course_offerings(tem
 CREATE INDEX IF NOT EXISTS idx_offerings_institution ON public.course_offerings(institution_id);
 CREATE INDEX IF NOT EXISTS idx_offerings_lecturer ON public.course_offerings(lecturer_id);
 
+DROP TRIGGER IF EXISTS update_course_offerings_updated_at ON public.course_offerings;
 CREATE TRIGGER update_course_offerings_updated_at
 BEFORE UPDATE ON public.course_offerings
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -153,6 +158,7 @@ CREATE TABLE IF NOT EXISTS public.enrolments (
 CREATE INDEX IF NOT EXISTS idx_enrolments_student ON public.enrolments(student_id);
 CREATE INDEX IF NOT EXISTS idx_enrolments_offering ON public.enrolments(offering_id);
 
+DROP TRIGGER IF EXISTS update_enrolments_updated_at ON public.enrolments;
 CREATE TRIGGER update_enrolments_updated_at
 BEFORE UPDATE ON public.enrolments
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -167,12 +173,27 @@ ALTER TABLE public.course_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.course_offerings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.enrolments ENABLE ROW LEVEL SECURITY;
 
--- Default permissive read access for authenticated / public users
+-- Idempotent RLS Policies
+DROP POLICY IF EXISTS "Institutions viewable by all" ON public.institutions;
 CREATE POLICY "Institutions viewable by all" ON public.institutions FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Course templates viewable by all" ON public.course_templates;
 CREATE POLICY "Course templates viewable by all" ON public.course_templates FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Course offerings viewable by all" ON public.course_offerings;
 CREATE POLICY "Course offerings viewable by all" ON public.course_offerings FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Users can view profile directory" ON public.users;
 CREATE POLICY "Users can view profile directory" ON public.users FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Users can update own profile" ON public.users;
 CREATE POLICY "Users can update own profile" ON public.users FOR UPDATE USING (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Memberships viewable by institution members" ON public.memberships;
 CREATE POLICY "Memberships viewable by institution members" ON public.memberships FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Enrolments viewable by enrolled student and lecturers" ON public.enrolments;
 CREATE POLICY "Enrolments viewable by enrolled student and lecturers" ON public.enrolments FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Students can create enrolment" ON public.enrolments;
 CREATE POLICY "Students can create enrolment" ON public.enrolments FOR INSERT WITH CHECK (auth.uid() = student_id OR auth.uid() IS NULL);
