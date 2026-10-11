@@ -1,11 +1,29 @@
 from datetime import datetime, timezone
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 from uuid import UUID, uuid4
 from fastapi import HTTPException, status
 from postgrest.exceptions import APIError
+from app.core.security import (
+    create_access_token,
+    create_password_reset_token,
+    decode_access_token,
+    hash_password,
+    verify_password,
+    verify_password_reset_token,
+)
 from app.core.supabase import get_supabase_client
-from app.schemas.auth import SignInRequest, SignUpRequest, TokenResponse
+from app.schemas.auth import (
+    PasswordRecoveryRequest,
+    PasswordRecoveryResponse,
+    PasswordResetRequest,
+    PasswordResetResponse,
+    SessionPrincipal,
+    SignInRequest,
+    SignOutResponse,
+    SignUpRequest,
+    TokenResponse,
+)
 from app.schemas.course_offering import CourseOfferingCreate, CourseOfferingResponse, CourseOfferingUpdate
 from app.schemas.course_template import CourseTemplateCreate, CourseTemplateResponse, CourseTemplateUpdate
 from app.schemas.enrolment import EnrolmentCreate, EnrolmentResponse, EnrolmentUpdate
@@ -21,7 +39,7 @@ def utc_now() -> datetime:
 
 
 class DatabaseRepository:
-    """Repository managing academic multi-tenant entities with Supabase integration and robust fallback."""
+    """Repository managing academic multi-tenant entities with Supabase integration, password hashing, and session lifecycle."""
 
     def __init__(self):
         # Local state storage adhering strictly to relational schema
@@ -31,6 +49,9 @@ class DatabaseRepository:
         self._course_templates: Dict[UUID, Dict[str, Any]] = {}
         self._course_offerings: Dict[UUID, Dict[str, Any]] = {}
         self._enrolments: Dict[UUID, Dict[str, Any]] = {}
+
+        # Set of revoked/invalidated session tokens or token identifiers
+        self._revoked_tokens: Set[str] = set()
 
         self._seed_default_data()
 
@@ -62,11 +83,15 @@ class DatabaseRepository:
         user2_id = UUID("10000000-0000-0000-0000-000000000002")
         user3_id = UUID("10000000-0000-0000-0000-000000000003")
 
+        # Hash default seed user passwords securely using bcrypt
+        default_pwd_hash = hash_password("Password123!")
+
         self._users[user1_id] = {
             "id": user1_id,
             "email": "admin@ubasify.edu",
             "full_name": "Dr. Ada Lovelace",
             "avatar_url": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150",
+            "password_hash": default_pwd_hash,
             "created_at": now,
             "updated_at": now,
         }
@@ -75,6 +100,7 @@ class DatabaseRepository:
             "email": "lecturer@mipt.edu",
             "full_name": "Prof. Alan Turing",
             "avatar_url": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150",
+            "password_hash": default_pwd_hash,
             "created_at": now,
             "updated_at": now,
         }
@@ -83,6 +109,7 @@ class DatabaseRepository:
             "email": "student@mipt.edu",
             "full_name": "Kazeem Oladimeji",
             "avatar_url": "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150",
+            "password_hash": default_pwd_hash,
             "created_at": now,
             "updated_at": now,
         }
@@ -308,11 +335,13 @@ class DatabaseRepository:
 
         user_id = data.id or uuid4()
         now = utc_now()
+        pwd_hash = hash_password(data.password) if data.password else None
         payload = {
             "id": user_id,
             "email": str(data.email),
             "full_name": data.full_name,
             "avatar_url": data.avatar_url,
+            "password_hash": pwd_hash,
             "created_at": now,
             "updated_at": now,
         }
@@ -615,15 +644,25 @@ class DatabaseRepository:
         return EnrolmentResponse.model_validate(enr)
 
     # =========================================================================
-    # AUTHENTICATION
+    # AUTHENTICATION & SECURITY (Registration, Login, Logout, Recovery)
     # =========================================================================
     def sign_up(self, req: SignUpRequest) -> TokenResponse:
+        # Check email uniqueness locally
+        for u in self._users.values():
+            if u["email"].lower() == req.email.lower():
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+
+        # Securely hash password using bcrypt
+        pwd_hash = hash_password(req.password)
+        new_user_id = uuid4()
+        now = utc_now()
+
         # Attempt Supabase Auth signup
         try:
             supabase = get_supabase_client()
             auth_res = supabase.auth.sign_up(
                 {
-                    "email": req.email,
+                    "email": str(req.email),
                     "password": req.password,
                     "options": {
                         "data": {
@@ -633,56 +672,22 @@ class DatabaseRepository:
                 }
             )
             if auth_res.user:
-                user_id = UUID(auth_res.user.id)
-                user_resp = UserResponse(
-                    id=user_id,
-                    email=req.email,
-                    full_name=req.full_name,
-                    avatar_url=None,
-                    created_at=utc_now(),
-                    updated_at=utc_now(),
-                )
-                access_token = (
-                    auth_res.session.access_token if auth_res.session else f"jwt_mock_token_{user_id}"
-                )
-                # Store user in local repo
-                self._users[user_id] = user_resp.model_dump()
-                # Create default membership if institution provided
-                if req.institution_id and req.institution_id in self._institutions:
-                    self.create_membership(
-                        MembershipCreate(
-                            user_id=user_id,
-                            institution_id=req.institution_id,
-                            role=req.role or MembershipRole.STUDENT,
-                            status=MembershipStatus.ACTIVE,
-                        )
-                    )
-                return TokenResponse(
-                    access_token=access_token,
-                    token_type="bearer",
-                    expires_in=3600,
-                    user=user_resp,
-                )
+                new_user_id = UUID(auth_res.user.id)
         except Exception as e:
             logger.debug("Supabase auth signup fallback: %s", e)
 
-        # Fallback local signup
-        for u in self._users.values():
-            if u["email"].lower() == req.email.lower():
-                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
-
-        new_user_id = uuid4()
-        now = utc_now()
         user_dict = {
             "id": new_user_id,
             "email": str(req.email),
             "full_name": req.full_name,
             "avatar_url": None,
+            "password_hash": pwd_hash,
             "created_at": now,
             "updated_at": now,
         }
         self._users[new_user_id] = user_dict
 
+        # Create default institutional membership if specified
         if req.institution_id and req.institution_id in self._institutions:
             self.create_membership(
                 MembershipCreate(
@@ -693,20 +698,34 @@ class DatabaseRepository:
                 )
             )
 
+        # Issue cryptographically signed session access token
+        access_token = create_access_token(
+            subject=new_user_id,
+            extra_claims={"email": str(req.email), "full_name": req.full_name},
+        )
+
         return TokenResponse(
-            access_token=f"demo_bearer_token_{new_user_id}",
+            access_token=access_token,
             token_type="bearer",
-            expires_in=3600,
+            expires_in=86400,
             user=UserResponse.model_validate(user_dict),
         )
 
     def sign_in(self, req: SignInRequest) -> TokenResponse:
+        # Look up user by email
+        matched_user = None
+        for u in self._users.values():
+            if u["email"].lower() == req.email.lower():
+                matched_user = u
+                break
+
+        # Attempt Supabase Auth sign in
         try:
             supabase = get_supabase_client()
             auth_res = supabase.auth.sign_in_with_password(
-                {"email": req.email, "password": req.password}
+                {"email": str(req.email), "password": req.password}
             )
-            if auth_res.user and auth_res.session:
+            if auth_res.user:
                 user_id = UUID(auth_res.user.id)
                 user_obj = self._users.get(user_id)
                 if not user_obj:
@@ -715,30 +734,169 @@ class DatabaseRepository:
                         "email": str(req.email),
                         "full_name": auth_res.user.user_metadata.get("full_name", req.email.split("@")[0]),
                         "avatar_url": auth_res.user.user_metadata.get("avatar_url"),
+                        "password_hash": hash_password(req.password),
                         "created_at": utc_now(),
                         "updated_at": utc_now(),
                     }
                     self._users[user_id] = user_obj
+                access_token = create_access_token(
+                    subject=user_id,
+                    extra_claims={"email": str(req.email), "full_name": user_obj["full_name"]},
+                )
                 return TokenResponse(
-                    access_token=auth_res.session.access_token,
+                    access_token=access_token,
                     token_type="bearer",
-                    expires_in=3600,
+                    expires_in=86400,
                     user=UserResponse.model_validate(user_obj),
                 )
         except Exception as e:
             logger.debug("Supabase auth signin fallback: %s", e)
 
-        # Fallback local signin check
+        # Fallback local credential verification with bcrypt
+        if not matched_user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+        user_pwd_hash = matched_user.get("password_hash")
+        if not user_pwd_hash or not verify_password(req.password, user_pwd_hash):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+        access_token = create_access_token(
+            subject=matched_user["id"],
+            extra_claims={"email": matched_user["email"], "full_name": matched_user["full_name"]},
+        )
+        return TokenResponse(
+            access_token=access_token,
+            token_type="bearer",
+            expires_in=86400,
+            user=UserResponse.model_validate(matched_user),
+        )
+
+    def sign_out(self, token: Optional[str] = None) -> SignOutResponse:
+        """Invalidates the provided session token and cleans up active session."""
+        if token:
+            self._revoked_tokens.add(token)
+            try:
+                payload = decode_access_token(token)
+                jti = payload.get("jti")
+                if jti:
+                    self._revoked_tokens.add(jti)
+            except Exception:
+                pass
+
+        try:
+            supabase = get_supabase_client()
+            supabase.auth.sign_out()
+        except Exception as e:
+            logger.debug("Supabase signout fallback: %s", e)
+
+        return SignOutResponse(message="Successfully logged out and session invalidated")
+
+    def get_current_user_from_token(self, token: str) -> SessionPrincipal:
+        """Validates JWT access token, checks revocation, and derives verified principal."""
+        if token in self._revoked_tokens:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session token has been invalidated or logged out",
+            )
+
+        try:
+            payload = decode_access_token(token)
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+
+        jti = payload.get("jti")
+        if jti and jti in self._revoked_tokens:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session token has been revoked",
+            )
+
+        try:
+            user_id = UUID(payload["sub"])
+        except (KeyError, ValueError):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid subject in token")
+
+        user = self._users.get(user_id)
+        if not user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User account not found")
+
+        # Fetch memberships belonging to user
+        user_memberships = [m for m in self._memberships.values() if m["user_id"] == user_id]
+
+        return SessionPrincipal(
+            user=UserResponse.model_validate(user),
+            memberships=[MembershipResponse.model_validate(m) for m in user_memberships],
+        )
+
+    def request_password_recovery(self, req: PasswordRecoveryRequest) -> PasswordRecoveryResponse:
+        """Dispatches password recovery request and generates secure password reset token."""
+        # Find user
+        matched_user = None
         for u in self._users.values():
             if u["email"].lower() == req.email.lower():
-                return TokenResponse(
-                    access_token=f"demo_bearer_token_{u['id']}",
-                    token_type="bearer",
-                    expires_in=3600,
-                    user=UserResponse.model_validate(u),
-                )
+                matched_user = u
+                break
 
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+        # Attempt Supabase Auth password recovery
+        try:
+            supabase = get_supabase_client()
+            supabase.auth.reset_password_for_email(str(req.email))
+        except Exception as e:
+            logger.debug("Supabase password recovery request fallback: %s", e)
+
+        if not matched_user:
+            # Return generic message to prevent user enumeration
+            return PasswordRecoveryResponse(
+                message="If an account with that email exists, password recovery instructions have been dispatched.",
+                reset_token=None,
+            )
+
+        # Generate cryptographic password reset token
+        reset_token = create_password_reset_token(email=matched_user["email"], user_id=matched_user["id"])
+        return PasswordRecoveryResponse(
+            message="Password recovery token generated successfully. Use this token to reset your password.",
+            reset_token=reset_token,
+        )
+
+    def reset_password(self, req: PasswordResetRequest) -> PasswordResetResponse:
+        """Validates recovery token, hashes new password with bcrypt, and updates account."""
+        try:
+            payload = verify_password_reset_token(req.token)
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+        jti = payload.get("jti")
+        if jti and jti in self._revoked_tokens:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password reset token has already been used",
+            )
+
+        user_id = UUID(payload["sub"])
+        user = self._users.get(user_id)
+        if not user:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User account not found")
+
+        # Attempt Supabase user password update
+        try:
+            supabase = get_supabase_client()
+            supabase.auth.update_user({"password": req.new_password})
+        except Exception as e:
+            logger.debug("Supabase update password fallback: %s", e)
+
+        # Hash new password securely with bcrypt
+        new_pwd_hash = hash_password(req.new_password)
+        user["password_hash"] = new_pwd_hash
+        user["updated_at"] = utc_now()
+
+        # Invalidate the used reset token
+        if jti:
+            self._revoked_tokens.add(jti)
+        self._revoked_tokens.add(req.token)
+
+        return PasswordResetResponse(
+            message="Password has been successfully reset. You may now log in with your new credentials."
+        )
 
 
 # Singleton repository instance

@@ -73,3 +73,17 @@ export interface AuthSession {
   access_token: string;
   token_type: string;
 }
+
+export interface SessionPrincipal {
+  user: UserProfile;
+  memberships: Membership[];
+}
+
+export interface PasswordRecoveryResponse {
+  message: string;
+  reset_token: string | null;
+}
+
+export interface PasswordResetResponse {
+  message: string;
+}

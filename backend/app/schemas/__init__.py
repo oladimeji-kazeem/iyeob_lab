@@ -1,5 +1,10 @@
 from app.schemas.auth import (
     AuthSession,
+    PasswordRecoveryRequest,
+    PasswordRecoveryResponse,
+    PasswordResetRequest,
+    PasswordResetResponse,
+    SessionPrincipal,
     SignInRequest,
     SignOutResponse,
     SignUpRequest,
@@ -80,4 +85,9 @@ __all__ = [
     "TokenResponse",
     "SignOutResponse",
     "AuthSession",
+    "PasswordRecoveryRequest",
+    "PasswordRecoveryResponse",
+    "PasswordResetRequest",
+    "PasswordResetResponse",
+    "SessionPrincipal",
 ]

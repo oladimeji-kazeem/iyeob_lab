@@ -19,6 +19,10 @@ import type {
   Enrolment,
   Institution,
   Membership,
+  MembershipRole,
+  PasswordRecoveryResponse,
+  PasswordResetResponse,
+  SessionPrincipal,
   UserProfile,
 } from "@/lib/types";
 
@@ -31,8 +35,11 @@ type ActiveTab =
   | "enrolments"
   | "auth";
 
+type AuthMode = "signin" | "signup" | "forgot" | "reset";
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("overview");
+  const [authMode, setAuthMode] = useState<AuthMode>("signin");
   const [loading, setLoading] = useState(false);
   const [backendStatus, setBackendStatus] = useState<string | null>(null);
   const [supabaseStatus, setSupabaseStatus] = useState<string | null>(null);
@@ -45,11 +52,24 @@ export default function Home() {
   const [offerings, setOfferings] = useState<CourseOffering[]>([]);
   const [enrolments, setEnrolments] = useState<Enrolment[]>([]);
 
+  // Authenticated session state
+  const [currentSession, setCurrentSession] = useState<SessionPrincipal | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(null);
+
   // Auth form state
-  const [authEmail, setAuthEmail] = useState("student@ubasify.edu");
+  const [authEmail, setAuthEmail] = useState("student@mipt.edu");
   const [authPassword, setAuthPassword] = useState("Password123!");
-  const [authName, setAuthName] = useState("Ada Lovelace");
+  const [authName, setAuthName] = useState("Kazeem Oladimeji");
+  const [authRole, setAuthRole] = useState<MembershipRole>("student");
+  const [authInstitutionId, setAuthInstitutionId] = useState<string>("");
+
+  // Password Recovery / Reset form state
+  const [recoveryEmail, setRecoveryEmail] = useState("student@mipt.edu");
+  const [resetToken, setResetToken] = useState("");
+  const [newPassword, setNewPassword] = useState("NewSecurePassword456!");
+
   const [authMsg, setAuthMsg] = useState<string | null>(null);
+  const [authMsgType, setAuthMsgType] = useState<"success" | "error">("success");
 
   // New institution form state
   const [instName, setInstName] = useState("");
@@ -98,6 +118,9 @@ export default function Home() {
       setTemplates(tpls);
       setOfferings(offs);
       setEnrolments(enrs);
+      if (insts.length > 0 && !authInstitutionId) {
+        setAuthInstitutionId(insts[0].id);
+      }
     } catch (err) {
       console.error("Failed to load initial data:", err);
     } finally {
@@ -149,6 +172,9 @@ export default function Home() {
           setTemplates(tpls);
           setOfferings(offs);
           setEnrolments(enrs);
+          if (insts.length > 0) {
+            setAuthInstitutionId(insts[0].id);
+          }
         }
       } catch (err) {
         console.error("Failed to load initial data:", err);
@@ -192,7 +218,8 @@ export default function Home() {
     }
   };
 
-  const handleAuthSignup = async () => {
+  const handleAuthSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
     setAuthMsg(null);
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/auth/signup`, {
@@ -202,22 +229,29 @@ export default function Home() {
           email: authEmail,
           password: authPassword,
           full_name: authName,
-          role: "student",
+          role: authRole,
+          institution_id: authInstitutionId || null,
         }),
       });
       const data = await res.json();
       if (res.ok) {
-        setAuthMsg(`Signed up successfully! Token: ${data.access_token.slice(0, 16)}...`);
+        setAuthToken(data.access_token);
+        setAuthMsgType("success");
+        setAuthMsg(`Account registered & password hashed with bcrypt! Logged in as ${data.user.full_name}.`);
+        await fetchSessionUser(data.access_token);
         await loadData();
       } else {
-        setAuthMsg(`Error: ${data.detail || "Signup failed"}`);
+        setAuthMsgType("error");
+        setAuthMsg(`Registration failed: ${data.detail || "Unknown error"}`);
       }
     } catch (err) {
-      setAuthMsg(`Failed: ${String(err)}`);
+      setAuthMsgType("error");
+      setAuthMsg(`Connection error: ${String(err)}`);
     }
   };
 
-  const handleAuthSignin = async () => {
+  const handleAuthSignin = async (e: React.FormEvent) => {
+    e.preventDefault();
     setAuthMsg(null);
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/auth/signin`, {
@@ -230,12 +264,105 @@ export default function Home() {
       });
       const data = await res.json();
       if (res.ok) {
-        setAuthMsg(`Authenticated as ${data.user.full_name} (${data.user.email})`);
+        setAuthToken(data.access_token);
+        setAuthMsgType("success");
+        setAuthMsg(`Authentication successful! Verified password hash.`);
+        await fetchSessionUser(data.access_token);
       } else {
-        setAuthMsg(`Error: ${data.detail || "Authentication failed"}`);
+        setAuthMsgType("error");
+        setAuthMsg(`Authentication failed: ${data.detail || "Invalid credentials"}`);
       }
     } catch (err) {
-      setAuthMsg(`Failed: ${String(err)}`);
+      setAuthMsgType("error");
+      setAuthMsg(`Connection error: ${String(err)}`);
+    }
+  };
+
+  const fetchSessionUser = async (token: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const principal: SessionPrincipal = await res.json();
+        setCurrentSession(principal);
+      }
+    } catch (err) {
+      console.error("Failed to fetch session principal:", err);
+    }
+  };
+
+  const handleAuthSignout = async () => {
+    setAuthMsg(null);
+    try {
+      if (authToken) {
+        await fetch(`${API_BASE_URL}/api/v1/auth/signout`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+      }
+      setAuthToken(null);
+      setCurrentSession(null);
+      setAuthMsgType("success");
+      setAuthMsg("Successfully logged out. Session token has been invalidated.");
+    } catch (err) {
+      setAuthMsgType("error");
+      setAuthMsg(`Logout error: ${String(err)}`);
+    }
+  };
+
+  const handlePasswordRecovery = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthMsg(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/auth/forgot-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: recoveryEmail }),
+      });
+      const data: PasswordRecoveryResponse = await res.json();
+      if (res.ok) {
+        setAuthMsgType("success");
+        if (data.reset_token) {
+          setResetToken(data.reset_token);
+          setAuthMsg(`Recovery token generated! Copy it below or proceed to the Reset tab.`);
+          setAuthMode("reset");
+        } else {
+          setAuthMsg(data.message);
+        }
+      } else {
+        setAuthMsgType("error");
+        setAuthMsg("Password recovery failed.");
+      }
+    } catch (err) {
+      setAuthMsgType("error");
+      setAuthMsg(`Error: ${String(err)}`);
+    }
+  };
+
+  const handlePasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthMsg(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/auth/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: resetToken, new_password: newPassword }),
+      });
+      const data: PasswordResetResponse = await res.json();
+      if (res.ok) {
+        setAuthMsgType("success");
+        setAuthMsg(data.message);
+        setAuthPassword(newPassword);
+        setAuthMode("signin");
+      } else {
+        const err = await res.json();
+        setAuthMsgType("error");
+        setAuthMsg(`Reset failed: ${err.detail || "Invalid or expired token"}`);
+      }
+    } catch (err) {
+      setAuthMsgType("error");
+      setAuthMsg(`Error: ${String(err)}`);
     }
   };
 
@@ -258,21 +385,36 @@ export default function Home() {
             <span className="status-dot"></span>
             FastAPI: {backendStatus || "Checking..."}
           </div>
+          {currentSession ? (
+            <div
+              className="badge"
+              style={{
+                borderColor: "var(--lemon-green)",
+                color: "var(--lemon-green)",
+                background: "rgba(163, 230, 53, 0.12)",
+              }}
+            >
+              👤 {currentSession.user.full_name}
+            </div>
+          ) : (
+            <div className="badge" style={{ color: "var(--text-dim)" }}>
+              Guest Session
+            </div>
+          )}
         </div>
       </header>
 
       <main className="container">
         <section className="hero">
           <div className="hero-pill">
-            <span>⚡</span> Supabase PostgreSQL Database & Modular Architecture
+            <span>🛡️</span> Authentication, Password Hashing & Secure Session Architecture
           </div>
           <h1 className="hero-title">
             Enterprise Academic <span className="gradient-text">Practical Learning</span> Engine
           </h1>
           <p className="hero-subtitle">
-            Seamlessly integrated with Supabase PostgreSQL. Featuring robust schema architecture:
-            UUID primary keys, foreign key constraints, separated reusable course templates,
-            per-semester offerings, institutional memberships, and student enrollments.
+            Engineered with cryptographic password hashing (bcrypt), signed JWT session tokens, token
+            revocation on logout, password recovery flows, and Row Level Security on Supabase PostgreSQL.
           </p>
 
           <div className="hero-actions">
@@ -307,7 +449,7 @@ export default function Home() {
                 Supabase Cloud Connection Credentials
               </h2>
               <p style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                Target database project configured in frontend and backend environments
+                Configured with bcrypt password hashing and tokenized session derivations
               </p>
             </div>
             <div className="badge badge-supabase">Status: Active Integration</div>
@@ -322,12 +464,12 @@ export default function Home() {
               <div className="cred-value">{SUPABASE_URL}</div>
             </div>
             <div className="cred-box">
-              <div className="cred-label">Publishable Anon Key</div>
-              <div className="cred-value">sb_publishable_CBQUculx...</div>
+              <div className="cred-label">Password Hashing</div>
+              <div className="cred-value">Bcrypt (Salt Rounds: 12)</div>
             </div>
             <div className="cred-box">
-              <div className="cred-label">Database Engine</div>
-              <div className="cred-value">PostgreSQL 15 (UUID-OSSP + PGCrypto)</div>
+              <div className="cred-label">Session Protocol</div>
+              <div className="cred-value">Signed JWT Bearer + JTI Revocation</div>
             </div>
           </div>
         </section>
@@ -341,6 +483,13 @@ export default function Home() {
               onClick={() => setActiveTab("overview")}
             >
               📊 Architecture Overview
+            </button>
+            <button
+              type="button"
+              className={`tab-btn ${activeTab === "auth" ? "active" : ""}`}
+              onClick={() => setActiveTab("auth")}
+            >
+              🔐 Auth & Session Manager
             </button>
             <button
               type="button"
@@ -377,43 +526,308 @@ export default function Home() {
             >
               📝 Enrolments ({enrolments.length})
             </button>
-            <button
-              type="button"
-              className={`tab-btn ${activeTab === "auth" ? "active" : ""}`}
-              onClick={() => setActiveTab("auth")}
-            >
-              🔐 Auth Simulator
-            </button>
           </nav>
 
           {/* TAB: OVERVIEW */}
           {activeTab === "overview" && (
             <section className="grid">
               <article className="card">
-                <div className="card-icon">🏛️</div>
-                <h2 className="card-title">Institutions & Access</h2>
+                <div className="card-icon">🛡️</div>
+                <h2 className="card-title">Authentication & Security</h2>
                 <p className="card-description">
-                  Tenant boundaries with unique academic codes, domains, and multi-tenant isolation.
-                  Users hold memberships with strict role scopes (student, lecturer, admin).
+                  Bcrypt salted password hashing, JWT session signing, token revocation upon logout,
+                  and cryptographic single-use password recovery tokens.
+                </p>
+              </article>
+              <article className="card">
+                <div className="card-icon">🏛️</div>
+                <h2 className="card-title">Institutions & Roles</h2>
+                <p className="card-description">
+                  Multi-tenant isolation with unique academic codes and domains. Users hold
+                  institutional memberships with roles (student, lecturer, admin).
                 </p>
               </article>
               <article className="card">
                 <div className="card-icon">📚</div>
-                <h2 className="card-title">Separated Course Templates</h2>
+                <h2 className="card-title">Separated Curricula</h2>
                 <p className="card-description">
-                  Reusable master curricula and academic credits independent of any institution or
-                  semester term. Completely separated from offerings and pricing.
-                </p>
-              </article>
-              <article className="card">
-                <div className="card-icon">🎓</div>
-                <h2 className="card-title">Offerings & Enrollments</h2>
-                <p className="card-description">
-                  Institutions schedule templates into specific terms (e.g. Fall 2026), attaching
-                  per-semester pricing, capacities, and assigned lecturers with unique constraints.
+                  Reusable master course templates independent of offerings, semester pricing,
+                  or institutional schedules.
                 </p>
               </article>
             </section>
+          )}
+
+          {/* TAB: AUTH & SESSION MANAGER */}
+          {activeTab === "auth" && (
+            <div className="interactive-panel">
+              {/* Authenticated Session Header */}
+              {currentSession ? (
+                <div
+                  style={{
+                    background: "rgba(16, 42, 67, 0.6)",
+                    border: "1px solid rgba(163, 230, 53, 0.3)",
+                    borderRadius: "var(--radius-md)",
+                    padding: "1.25rem 1.5rem",
+                    marginBottom: "2rem",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    flexWrap: "wrap",
+                    gap: "1rem",
+                  }}
+                >
+                  <div>
+                    <span style={{ fontSize: "0.75rem", textTransform: "uppercase", color: "var(--lemon-green)", fontWeight: 700 }}>
+                      Active Authenticated Session
+                    </span>
+                    <h3 style={{ fontSize: "1.2rem", fontWeight: 700, color: "#fff" }}>
+                      {currentSession.user.full_name} ({currentSession.user.email})
+                    </h3>
+                    <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.4rem", flexWrap: "wrap" }}>
+                      {currentSession.memberships.map((m) => (
+                        <span key={m.id} className={`badge-tag badge-${m.role}`}>
+                          {m.role} ({m.status})
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <button type="button" className="btn-secondary" onClick={handleAuthSignout}>
+                    🚪 Invalidate Session & Logout
+                  </button>
+                </div>
+              ) : null}
+
+              <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1.5rem", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className={`btn-secondary ${authMode === "signin" ? "btn-primary" : ""}`}
+                  style={{ padding: "0.5rem 1rem", fontSize: "0.85rem" }}
+                  onClick={() => {
+                    setAuthMode("signin");
+                    setAuthMsg(null);
+                  }}
+                >
+                  🔑 Sign In (Login)
+                </button>
+                <button
+                  type="button"
+                  className={`btn-secondary ${authMode === "signup" ? "btn-primary" : ""}`}
+                  style={{ padding: "0.5rem 1rem", fontSize: "0.85rem" }}
+                  onClick={() => {
+                    setAuthMode("signup");
+                    setAuthMsg(null);
+                  }}
+                >
+                  ✨ Register (Sign Up)
+                </button>
+                <button
+                  type="button"
+                  className={`btn-secondary ${authMode === "forgot" ? "btn-primary" : ""}`}
+                  style={{ padding: "0.5rem 1rem", fontSize: "0.85rem" }}
+                  onClick={() => {
+                    setAuthMode("forgot");
+                    setAuthMsg(null);
+                  }}
+                >
+                  📩 Password Recovery
+                </button>
+                <button
+                  type="button"
+                  className={`btn-secondary ${authMode === "reset" ? "btn-primary" : ""}`}
+                  style={{ padding: "0.5rem 1rem", fontSize: "0.85rem" }}
+                  onClick={() => {
+                    setAuthMode("reset");
+                    setAuthMsg(null);
+                  }}
+                >
+                  🔄 Reset Password
+                </button>
+              </div>
+
+              {/* MODE: SIGN IN */}
+              {authMode === "signin" && (
+                <form onSubmit={handleAuthSignin}>
+                  <h3 className="interactive-title">User Login & Session Issuance</h3>
+                  <p className="interactive-desc">
+                    Authenticate using email and password. Credentials are verified against bcrypt password hashes.
+                  </p>
+                  <div className="form-grid">
+                    <div className="form-field">
+                      <label className="form-label">Email Address</label>
+                      <input
+                        className="input-dark"
+                        type="email"
+                        value={authEmail}
+                        onChange={(e) => setAuthEmail(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-field">
+                      <label className="form-label">Password</label>
+                      <input
+                        className="input-dark"
+                        type="password"
+                        value={authPassword}
+                        onChange={(e) => setAuthPassword(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <button type="submit" className="btn-primary">
+                    Authenticate & Create Session
+                  </button>
+                </form>
+              )}
+
+              {/* MODE: SIGN UP */}
+              {authMode === "signup" && (
+                <form onSubmit={handleAuthSignup}>
+                  <h3 className="interactive-title">Account Registration & Password Hashing</h3>
+                  <p className="interactive-desc">
+                    Passwords are never stored in plaintext and are salted and hashed using bcrypt (12 rounds).
+                  </p>
+                  <div className="form-grid">
+                    <div className="form-field">
+                      <label className="form-label">Full Name</label>
+                      <input
+                        className="input-dark"
+                        value={authName}
+                        onChange={(e) => setAuthName(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-field">
+                      <label className="form-label">Email Address</label>
+                      <input
+                        className="input-dark"
+                        type="email"
+                        value={authEmail}
+                        onChange={(e) => setAuthEmail(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-field">
+                      <label className="form-label">Password (Min 6 chars)</label>
+                      <input
+                        className="input-dark"
+                        type="password"
+                        value={authPassword}
+                        onChange={(e) => setAuthPassword(e.target.value)}
+                        minLength={6}
+                        required
+                      />
+                    </div>
+                    <div className="form-field">
+                      <label className="form-label">Institutional Role</label>
+                      <select
+                        className="select-dark"
+                        value={authRole}
+                        onChange={(e) => setAuthRole(e.target.value as MembershipRole)}
+                      >
+                        <option value="student">Student</option>
+                        <option value="lecturer">Lecturer</option>
+                        <option value="admin">Administrator</option>
+                      </select>
+                    </div>
+                    <div className="form-field">
+                      <label className="form-label">Institution</label>
+                      <select
+                        className="select-dark"
+                        value={authInstitutionId}
+                        onChange={(e) => setAuthInstitutionId(e.target.value)}
+                      >
+                        {institutions.map((inst) => (
+                          <option key={inst.id} value={inst.id}>
+                            {inst.name} ({inst.code})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <button type="submit" className="btn-primary">
+                    Create Account & Hash Password
+                  </button>
+                </form>
+              )}
+
+              {/* MODE: PASSWORD RECOVERY */}
+              {authMode === "forgot" && (
+                <form onSubmit={handlePasswordRecovery}>
+                  <h3 className="interactive-title">Password Recovery Request</h3>
+                  <p className="interactive-desc">
+                    Enter your registered email address to receive a short-lived cryptographic reset token.
+                  </p>
+                  <div className="form-grid">
+                    <div className="form-field">
+                      <label className="form-label">Account Email Address</label>
+                      <input
+                        className="input-dark"
+                        type="email"
+                        value={recoveryEmail}
+                        onChange={(e) => setRecoveryEmail(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <button type="submit" className="btn-primary">
+                    Send Recovery Instructions
+                  </button>
+                </form>
+              )}
+
+              {/* MODE: PASSWORD RESET */}
+              {authMode === "reset" && (
+                <form onSubmit={handlePasswordReset}>
+                  <h3 className="interactive-title">Confirm Password Reset</h3>
+                  <p className="interactive-desc">
+                    Provide the cryptographic reset token and your new password to update account credentials.
+                  </p>
+                  <div className="form-grid">
+                    <div className="form-field" style={{ gridColumn: "1 / -1" }}>
+                      <label className="form-label">Password Reset Token</label>
+                      <input
+                        className="input-dark"
+                        value={resetToken}
+                        onChange={(e) => setResetToken(e.target.value)}
+                        placeholder="Paste reset token here..."
+                        required
+                      />
+                    </div>
+                    <div className="form-field">
+                      <label className="form-label">New Password (Min 6 chars)</label>
+                      <input
+                        className="input-dark"
+                        type="password"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        minLength={6}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <button type="submit" className="btn-primary">
+                    Update Password with Bcrypt Hash
+                  </button>
+                </form>
+              )}
+
+              {authMsg && (
+                <div
+                  style={{
+                    marginTop: "1.5rem",
+                    padding: "0.85rem 1.25rem",
+                    borderRadius: "var(--radius-sm)",
+                    background: "rgba(11, 25, 44, 0.8)",
+                    border: `1px solid ${authMsgType === "error" ? "rgba(239, 68, 68, 0.4)" : "var(--border-glass)"}`,
+                    fontSize: "0.9rem",
+                    color: authMsgType === "error" ? "#f87171" : "var(--lemon-green)",
+                  }}
+                >
+                  {authMsg}
+                </div>
+              )}
+            </div>
           )}
 
           {/* TAB: INSTITUTIONS */}
@@ -751,69 +1165,6 @@ export default function Home() {
               </div>
             </div>
           )}
-
-          {/* TAB: AUTH SIMULATOR */}
-          {activeTab === "auth" && (
-            <div className="interactive-panel">
-              <h3 className="interactive-title">Supabase Authentication Simulator</h3>
-              <p className="interactive-desc">
-                Test user identity provisioning, JWT tokens, and institutional role assignment.
-              </p>
-
-              <div className="form-grid">
-                <div className="form-field">
-                  <label className="form-label">Full Name</label>
-                  <input
-                    className="input-dark"
-                    value={authName}
-                    onChange={(e) => setAuthName(e.target.value)}
-                  />
-                </div>
-                <div className="form-field">
-                  <label className="form-label">Email Address</label>
-                  <input
-                    className="input-dark"
-                    type="email"
-                    value={authEmail}
-                    onChange={(e) => setAuthEmail(e.target.value)}
-                  />
-                </div>
-                <div className="form-field">
-                  <label className="form-label">Password</label>
-                  <input
-                    className="input-dark"
-                    type="password"
-                    value={authPassword}
-                    onChange={(e) => setAuthPassword(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", marginBottom: "1rem" }}>
-                <button type="button" className="btn-primary" onClick={handleAuthSignup}>
-                  Sign Up with Supabase
-                </button>
-                <button type="button" className="btn-secondary" onClick={handleAuthSignin}>
-                  Sign In Session
-                </button>
-              </div>
-
-              {authMsg && (
-                <div
-                  style={{
-                    padding: "0.75rem 1.25rem",
-                    borderRadius: "var(--radius-sm)",
-                    background: "rgba(11, 25, 44, 0.8)",
-                    border: "1px solid var(--border-glass)",
-                    fontSize: "0.9rem",
-                    color: authMsg.startsWith("Error") ? "#f87171" : "var(--lemon-green)",
-                  }}
-                >
-                  {authMsg}
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         <section className="monitor-bar">
@@ -822,8 +1173,8 @@ export default function Home() {
             <span className="monitor-val">{SUPABASE_PROJECT_ID}</span>
           </div>
           <div className="monitor-item">
-            <span className="monitor-label">Database Schema</span>
-            <span className="monitor-val">UUID PKs, FKs, RLS, Triggers</span>
+            <span className="monitor-label">Security Engine</span>
+            <span className="monitor-val">Bcrypt (Salt 12) + JWT Tokens</span>
           </div>
           <div className="monitor-item">
             <span className="monitor-label">FastAPI Engine</span>

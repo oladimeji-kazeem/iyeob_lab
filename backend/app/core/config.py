@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     SUPABASE_KEY: str = "sb_publishable_CBQUculxK-hOPnlfC7UYCQ_QebhjiDn"
     SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
 
+    # Security & Session Token Configuration
+    SECRET_KEY: str = "ubasify-super-secret-jwt-signing-key-for-iyeob-labs-2026"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
+    ALGORITHM: str = "HS256"
+
     @property
     def database_uri(self) -> str:
         """Constructs or returns the primary database connection URI."""
