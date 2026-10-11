@@ -1,36 +1,46 @@
 # Ubasify Practical Labs (Iyeob Lab)
 
-A modern full-stack platform for independent practical learning and laboratory management.
+A modern full-stack academic platform for independent practical learning and laboratory management.
 
 ---
 
 ## Architecture Overview
 
-The repository is organized as a modular monorepo:
+The repository is organized as a modular full-stack monorepo:
 
-- **`frontend/`**: TanStack Start, React 19, and Vite frontend application featuring client and SSR routing, UI components, and state management.
-- **`backend/`**: Node.js, Express, and TypeScript service designed for API routing, validation, authentication, and institution data operations.
+- **`frontend/`**: Next.js 16 (Turbopack), React 19, and TypeScript client featuring App Router, custom modern CSS design system, ESLint, and Prettier formatting.
+- **`backend/`**: FastAPI (Python 3.11+), Pydantic Settings, and Uvicorn providing high-performance REST APIs, configuration management, and automated test coverage.
 
 ```
 .
-├── backend/                # Node.js / Express / TypeScript backend
+├── backend/                  # FastAPI / Python backend service
+│   ├── app/
+│   │   ├── api/              # API router & versioned endpoints
+│   │   │   └── v1/
+│   │   │       └── endpoints/
+│   │   │           └── health.py  # Health-check endpoint
+│   │   ├── core/             # Pydantic Settings configuration
+│   │   │   └── config.py
+│   │   └── main.py           # FastAPI app instance, CORS & server bootstrapper
+│   ├── tests/                # Pytest test suite & TestClient fixtures
+│   │   ├── conftest.py
+│   │   ├── test_config.py
+│   │   └── test_health.py
+│   ├── .env.example          # Environment variable template
+│   ├── pyproject.toml        # uv / PEP 621 project configuration
+│   ├── requirements.txt      # Python dependencies
+│   └── README.md             # Backend service documentation
+├── frontend/                 # Next.js 16 + TypeScript frontend
 │   ├── src/
-│   │   ├── config/         # Environment & service configuration
-│   │   ├── app.ts          # Express application initialization & middleware
-│   │   └── server.ts       # Server lifecycle & graceful shutdown
-│   ├── .env.example        # Environment variable template
-│   ├── package.json        # Backend dependencies & scripts
-│   ├── tsconfig.json       # TypeScript configuration
-│   └── README.md           # Backend service guide
-├── frontend/               # TanStack Start / React frontend
-│   ├── src/                # Pages, routes, components, and hooks
-│   ├── public/             # Static public assets
-│   ├── package.json        # Frontend dependencies & scripts
-│   ├── vite.config.ts      # Vite configuration
-│   └── README.md           # Frontend application guide
-├── .gitignore              # Monorepo git ignore rules
-├── package.json            # Root workspace orchestrator
-└── README.md               # Repository documentation
+│   │   └── app/              # App Router, Layout, Page & Styles
+│   ├── package.json          # Frontend scripts & dependencies
+│   ├── tsconfig.json         # TypeScript configuration
+│   ├── eslint.config.mjs     # ESLint configuration with Next.js & Prettier
+│   ├── .prettierrc           # Prettier formatting rules
+│   └── README.md             # Frontend application documentation
+├── .gitignore                # Monorepo git ignore rules
+├── package.json              # Root workspace orchestrator
+└── README.md                 # Repository documentation
 ```
 
 ---
@@ -38,74 +48,53 @@ The repository is organized as a modular monorepo:
 ## Getting Started
 
 ### Prerequisites
-- [Node.js](https://nodejs.org/) (v20.x or higher)
-- [npm](https://www.npmjs.com/) (v10.x or higher)
+- [Node.js](https://nodejs.org/) (v20.x or higher) & npm
+- [Python](https://www.python.org/) (v3.11 or higher)
+- [`uv`](https://docs.astral.sh/uv/) (recommended for Python package management)
 
 ### Installation
 
-Install dependencies for all workspaces from the project root:
+1. **Frontend dependencies**:
+   ```bash
+   cd frontend
+   npm install
+   ```
 
-```bash
-npm install
-```
-
-Or install dependencies inside each workspace independently:
-
-```bash
-cd frontend && npm install
-cd ../backend && npm install
-```
+2. **Backend dependencies**:
+   ```bash
+   cd backend
+   uv sync --all-extras
+   # Or with pip: pip install -r requirements.txt
+   ```
 
 ---
 
 ## Development
 
-Run development servers using npm workspace commands from the root:
+Run development servers using npm root scripts or directly in each service:
 
-| Command | Action | URL |
+| Service | Command | URL |
 | :--- | :--- | :--- |
-| `npm run dev:frontend` | Starts Vite dev server | `http://localhost:8080` |
-| `npm run dev:backend` | Starts Express dev server with live reload | `http://localhost:5000` |
+| **Frontend** | `npm run dev:frontend` | `http://localhost:3000` |
+| **Backend** | `npm run dev:backend` | `http://localhost:5000` |
 
-### Backend Environment Setup
-1. Enter the `backend/` directory:
-   ```bash
-   cd backend
-   ```
-2. Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-3. Set the variables as needed:
-   - `PORT`: HTTP server port (default: `5000`)
-   - `NODE_ENV`: Runtime mode (`development` / `production`)
-   - `FRONTEND_URL`: Allowed CORS origin (default: `http://localhost:8080`)
-
-### Backend Health Check
-When the backend service is running, verify the setup with:
-```bash
-curl http://localhost:5000/api/health
-```
+### Backend API Endpoints & Documentation
+- **Interactive OpenAPI Docs**: `http://localhost:5000/docs`
+- **ReDoc Documentation**: `http://localhost:5000/redoc`
+- **Health Check Probe**: `http://localhost:5000/health` (also available at `/api/v1/health`)
 
 ---
 
-## Build & Production
+## Testing & Quality
 
-Compile both services for production:
+Run code checks across the workspaces:
 
 ```bash
-# Build both frontend and backend
-npm run build
+# Frontend linting & formatting
+npm run lint
+npm run format
+npm run typecheck
 
-# Build frontend only
-npm run build:frontend
-
-# Build backend only
-npm run build:backend
-```
-
-Run the compiled backend in production:
-```bash
-cd backend
-npm run start
+# Backend tests
+npm run test:backend
 ```

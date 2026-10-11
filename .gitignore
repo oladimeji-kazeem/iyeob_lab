@@ -2,6 +2,11 @@
 node_modules/
 .pnp
 .pnp.js
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
 
 # Build and compilation outputs
 dist/
