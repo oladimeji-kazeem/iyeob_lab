@@ -1,46 +1,111 @@
-# Ubasify Labs Academy
+# Ubasify Practical Labs (Iyeob Lab)
 
-You are my senior software engineer. Help me build Ubasify Practical Labs, an independent multi-university practical learning platform.
+A modern full-stack platform for independent practical learning and laboratory management.
 
-Business model:
+---
 
-- Students pay per course per semester.
+## Architecture Overview
 
-- Students access practical manuals, datasets and starter code.
+The repository is organized as a modular monorepo:
 
-- Students run practicals on their own computers and submit their work.
+- **`frontend/`**: TanStack Start, React 19, and Vite frontend application featuring client and SSR routing, UI components, and state management.
+- **`backend/`**: Node.js, Express, and TypeScript service designed for API routing, validation, authentication, and institution data operations.
 
-- Lecturers review submissions, grade students and provide feedback.
+```
+.
+├── backend/                # Node.js / Express / TypeScript backend
+│   ├── src/
+│   │   ├── config/         # Environment & service configuration
+│   │   ├── app.ts          # Express application initialization & middleware
+│   │   └── server.ts       # Server lifecycle & graceful shutdown
+│   ├── .env.example        # Environment variable template
+│   ├── package.json        # Backend dependencies & scripts
+│   ├── tsconfig.json       # TypeScript configuration
+│   └── README.md           # Backend service guide
+├── frontend/               # TanStack Start / React frontend
+│   ├── src/                # Pages, routes, components, and hooks
+│   ├── public/             # Static public assets
+│   ├── package.json        # Frontend dependencies & scripts
+│   ├── vite.config.ts      # Vite configuration
+│   └── README.md           # Frontend application guide
+├── .gitignore              # Monorepo git ignore rules
+├── package.json            # Root workspace orchestrator
+└── README.md               # Repository documentation
+```
 
-- Platform administrators manage institutions, users, courses and payments.
+---
 
-Use a modular monolith. Separate reusable course templates from institution-specific semester offerings. Enforce server-side role-based access control. 
+## Getting Started
 
-Use only mocked data.
+### Prerequisites
+- [Node.js](https://nodejs.org/) (v20.x or higher)
+- [npm](https://www.npmjs.com/) (v10.x or higher)
 
-Use a theme formed from the colors: Navy Blue, Lemon Green, Teal, and Off-white.
+### Installation
 
-Use firebase effects with color gradient. Do not use firebase colors.
+Install dependencies for all workspaces from the project root:
 
-logo is attached
+```bash
+npm install
+```
 
-This project was built with [Lovable](https://lovable.dev).
+Or install dependencies inside each workspace independently:
 
-## Build with Lovable
+```bash
+cd frontend && npm install
+cd ../backend && npm install
+```
 
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/0d04ff49-70eb-4045-bbee-af0df2019996).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
+---
 
 ## Development
 
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+Run development servers using npm workspace commands from the root:
 
-```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
-npm run dev
+| Command | Action | URL |
+| :--- | :--- | :--- |
+| `npm run dev:frontend` | Starts Vite dev server | `http://localhost:8080` |
+| `npm run dev:backend` | Starts Express dev server with live reload | `http://localhost:5000` |
+
+### Backend Environment Setup
+1. Enter the `backend/` directory:
+   ```bash
+   cd backend
+   ```
+2. Copy `.env.example` to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+3. Set the variables as needed:
+   - `PORT`: HTTP server port (default: `5000`)
+   - `NODE_ENV`: Runtime mode (`development` / `production`)
+   - `FRONTEND_URL`: Allowed CORS origin (default: `http://localhost:8080`)
+
+### Backend Health Check
+When the backend service is running, verify the setup with:
+```bash
+curl http://localhost:5000/api/health
+```
+
+---
+
+## Build & Production
+
+Compile both services for production:
+
+```bash
+# Build both frontend and backend
+npm run build
+
+# Build frontend only
+npm run build:frontend
+
+# Build backend only
+npm run build:backend
+```
+
+Run the compiled backend in production:
+```bash
+cd backend
+npm run start
 ```
